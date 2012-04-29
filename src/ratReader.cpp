@@ -26,6 +26,7 @@ public:
     ~ratReader();
     void engine(int y, int x, int r, ChannelMask, Row &);
     void open();
+    void lookupChannels(std::set<Channel>& channel, const char* name);
     static const Reader::Description d;
 
 private:
@@ -34,13 +35,13 @@ private:
     void *buffer;
     int depth, xres, yres;
     MetaData::Bundle _meta;
+    std::map<Channel, const char*> channel_map;
     Lock lock;
 };
 
 static bool 
 test(int fd, const unsigned char* block, int length)
 {
-    //return true; // Need to hard code this in case other parts of the code will fail.
     return block[0] == 'f' && block[1] == 'b' && block[2] == 't' && block[3] == 'H';
 }
 
@@ -52,6 +53,33 @@ Reader* build(Read* iop, int fd, const unsigned char* b, int n)
 
 const 
 Reader::Description ratReader::d("rat\0", build, test);
+
+// This is from NDK exrReader.cpp example
+void 
+ratReader::lookupChannels(std::set<Channel>& channel, const char* name)
+{
+    if (strcmp(name, "y") == 0 || strcmp(name, "Y") == 0) 
+    {
+        channel.insert(Chan_Red);
+        if (!iop->raw()) 
+        {
+            channel.insert(Chan_Green);
+            channel.insert(Chan_Blue);
+        }
+    }
+    else if (strcmp(name, "C.red") == 0)
+        channel.insert(Chan_Red);
+    else if (strcmp(name, "C.green") == 0)
+        channel.insert(Chan_Green);
+    else if (strcmp(name, "C.blue") == 0)
+        channel.insert(Chan_Blue);
+    else if (strcmp(name, "C.alpha") == 0)
+        channel.insert(Chan_Alpha);
+    else if (strcmp(name, "Pz.red") == 0)
+        channel.insert(Chan_Z);
+    else
+        channel.insert(Reader::channel(name));
+}
 
 ratReader::ratReader(Read *r, int fd): Reader(r)
 {
@@ -72,7 +100,7 @@ ratReader::ratReader(Read *r, int fd): Reader(r)
     const IMG_Stat &stat = rat->getStat();
     depth = 0;
 
-    // Since RAT can store varying bitdepth per plane, so pixel-byte-algebra doesn't 
+    // Since RAT can store varying bitdepth per plane, pixel-byte-algebra doesn't 
     // help in finding out a number of channels. We need to iterate over planes. 
     for (int i = 0; i < stat.getNumPlanes(); i++)
     {
@@ -83,16 +111,45 @@ ratReader::ratReader(Read *r, int fd): Reader(r)
         #if defined(DEBUG)
         iop->warning("Plane name: %s", plane->getName());
         #endif
-        depth += IMGvectorSize(plane->getColorModel());
-        
-            
+        depth += IMGvectorSize(plane->getColorModel()); 
     } 
 
+    // For each channel in the file, create or locate the matching Nuke channel
+    // number, and store it in the channel_map
+    ChannelSet mask;
+    std::set<Channel> channels;
+    std::set<Channel>::iterator it;
+    for (int i = 0; i < stat.getNumPlanes(); i++)
+    {
+        IMG_Plane *plane = stat.getPlane(i);
+        int        nchan = IMGvectorSize(plane->getColorModel());
+
+        for (int j = 0; j < nchan; j++)
+        {
+            std::string chan_name;
+            std::string chan = std::string(plane->getComponentName(j) ? plane->getComponentName(j): "r"); 
+            if      (chan == "r") chan = "red";
+            else if (chan == "g") chan = "green";
+            else if (chan == "b") chan = "blue";
+            else if (chan == "a") chan = "alpha";
+            chan_name = std::string(plane->getName()) + std::string(".") + chan;
+            lookupChannels(channels, chan_name.c_str());
+            it = channels.end();
+            Channel channel = *it;
+            channel_map[channel] = chan_name.c_str();
+            #if defined(DEBUG)
+            iop->warning("Name Channel: %s", chan_name.c_str());
+            iop->warning("Real Channel: %s", getName(channel));
+            #endif
+            mask += channel;
+        }
+    }
     // Set info:
     #if defined(DEBUG)
     iop->warning("Channel number: %i", depth);
     #endif
     set_info(stat.getXres(), stat.getYres(), depth);
+    info_.channels(mask);
 }
 
 void
@@ -109,26 +166,37 @@ ratReader::engine(int y, int x, int xr, ChannelMask channels, Row& row)
     // Pointers to Nuke's channels:
     int Y = height() - y - 1;
     row.range(0, width());
-    float* R = row.writable(Chan_Red);
-    float* G = row.writable(Chan_Green);
-    float* B = row.writable(Chan_Blue);
-    float* A = row.writable(Chan_Alpha);
     
+    std::map<std::string, Channel> usedChans;
+    std::map<Channel, Channel> toCopy;
+
+    foreach (z, channels)
+    {
+        if (usedChans.find(channel_map[z]) != usedChans.end())
+        {
+            toCopy[z] = usedChans[channel_map[z]];
+            continue;
+        }
+        usedChans[channel_map[z]] = z;
+    }
+
+
     // Main scanline loop:
     for (int i = 0; i < Y; i++)
     {
         rat->readIntoBuffer(i, scanline, 0);
-        for (int j =0; j < width(); j++)
+        int nchan = 0;
+        foreach(z, channels)
         {
-            R[j]   = scanline[j];
-            G[j]   = scanline[j+width()];
-            B[j]   = scanline[j+width()*2];
-            A[j]   = scanline[j+width()*3];
-            // interleaved vesion:
-            //R[j] = scanline[(j*4)+x];
-            //G[j] = scanline[(j*4)+1+x];
-            //B[j] = scanline[(j*4)+2+x];
-            //A[j] = scanline[(j*4)+3+x];
+            #if defined(DEBUG)
+            iop->warning("Write to %s", getName(z));
+            #endif
+            float* dest = row.writable(z);
+            for (int j =0; j < width(); j++)
+            {
+                dest[j]  = scanline[j+width()*nchan];
+            }
+            nchan++;
         }
     } 
     lock.unlock();
