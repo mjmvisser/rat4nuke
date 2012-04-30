@@ -29,15 +29,15 @@ public:
     ratReaderFormat()
     {
         _use_scanline_engine = false;
-        _reverse_scanlines   = true;
+        _reverse_scanlines   = false;
     }
     void knobs(Knob_Callback c)
     {
         Bool_knob(c, &_use_scanline_engine, "use_scanline_engine", "use scanline engine");
         Tooltip(c, "Use either scanline or full raster engine to read data from *.rat files."
-                "Full raster should perform better for the expanse of memory bigger allocation.");
+                "Full raster should perform faster for the expanse of bigger memory consumption.");
         Bool_knob(c, &_reverse_scanlines, "reverse_scanlines", "reverse scanlines");
-        Tooltip(c, "Unlike Nuke images, *.rat files could be buttom-up. Use this option to reverse it.");
+        Tooltip(c, "Reverse the order of the scanlines in rat image.");
     }
 
     void append(Hash& hash)
@@ -55,10 +55,10 @@ public:
     }
     ratReader(Read*, int);
     ~ratReader();
-    void engine(int y, int x, int r, ChannelMask, Row &);
-    void scanline_engine(int y, int x, int r, ChannelMask, Row &);
-    void raster_engine(int y, int x, int r, ChannelMask, Row &);
-    void open();
+    void          open();
+    void          engine(int y, int x, int r, ChannelMask, Row &);
+    void   raster_engine(int y, int x, int r, ChannelMask, Row &);
+    void scanline_engine(int y, int x, int r, ChannelMask, Row &);    
     void lookupChannels(std::set<Channel>& channel, const char* name);
     static const Reader::Description d;
 
@@ -98,7 +98,7 @@ ReaderFormat* buildformat(Read* iop)
 }
 
 const 
-Reader::Description ratReader::d("rat\0", build, test);
+Reader::Description ratReader::d("rat\0", build, test, buildformat);
 
 // This is from NDK exrReader.cpp example
 void 
@@ -124,7 +124,11 @@ ratReader::lookupChannels(std::set<Channel>& channel, const char* name)
     else if (strcmp(name, "Pz.red") == 0)
         channel.insert(Chan_Z);
     else
-        channel.insert(Reader::channel(name));
+    {
+        Channel ch = Reader::channel(name);
+        for (int i=0; i<20; i++) incr(ch);
+        channel.insert(ch);
+    }
 }
 
 ratReader::ratReader(Read *r, int fd): Reader(r)
@@ -132,7 +136,7 @@ ratReader::ratReader(Read *r, int fd): Reader(r)
     // Some read params have to be specified: 
     buffer = NULL;
     loaded = false;
-    use_scanline_engine = false;
+    use_scanline_engine = true;
     parms = new IMG_FileParms();
     
     // Read knobs:
@@ -149,7 +153,7 @@ ratReader::ratReader(Read *r, int fd): Reader(r)
 
     // Set rest of settings:
     parms->setDataType(IMG_FLOAT);
-    //parms->setInterleaved(IMG_NON_INTERLEAVED);
+    parms->setInterleaved(IMG_NON_INTERLEAVED);
     
     // Create and open rat file, get stats:
     rat = IMG_File::open(r->filename(), parms);
@@ -200,7 +204,7 @@ ratReader::ratReader(Read *r, int fd): Reader(r)
             std::pair<int, int> idx(i, j);
             rat_chan_index[channel] = idx;
             #if defined(DEBUG)
-            iop->warning("Rat component %s becomes %s", chan_name.c_str(), getName(channel));
+            iop->warning("Rat %s (%i,%i) becomes %s", chan_name.c_str(), i, j, getName(channel));
             #endif
             mask += channel;
         }
@@ -209,21 +213,24 @@ ratReader::ratReader(Read *r, int fd): Reader(r)
     #if defined(DEBUG)
     iop->warning("Channel number: %i", depth);
     #endif
-    set_info(stat.getXres(), stat.getYres(), depth);
+    set_info(stat.getDataWidth(), stat.getDataHeight(), depth);
     info_.channels(mask);
 }
 
 void
 ratReader::open()
 {
-    loaded = rat->readImages(images);
-    if(!loaded)
-        iop->error("Can't load data from image: %s", rat->getStat().getFilename().buffer());
-    else
+    if (!use_scanline_engine)
     {
-        #if defined(DEBUG)
-        iop->warning("Image loaded: %s", rat->getStat().getFilename().buffer());
-        #endif
+        loaded = rat->readImages(images);
+        if(!loaded)
+            iop->error("Can't load data from image: %s", rat->getStat().getFilename().buffer());
+        else
+        {
+            #if defined(DEBUG)
+            iop->warning("Image loaded: %s", rat->getStat().getFilename().buffer());
+            #endif
+        }
     }
 }
 
@@ -248,10 +255,13 @@ ratReader::raster_engine(int y, int x, int xr, ChannelMask channels, Row& row)
     int Y = height() - y - 1;
     row.range(0, width());
     
-    if (!loaded)
-        this->open();
-    else
+   
+        //this->open();
+    if (loaded)
     {
+        #if defined(DEBUG)
+        iop->warning("Raster engine active.");
+        #endif
         foreach(z, channels)
         {
             int rindex = rat_chan_index[z].first;
@@ -266,12 +276,9 @@ ratReader::raster_engine(int y, int x, int xr, ChannelMask channels, Row& row)
 
             float       *dest   = row.writable(z);
             const float *pixels = (const float*)raster->getPixels();
-            // Scanline loop:
-            for (int i = 0; i < Y; i++)
-            {
-                for (int j =0; j < width(); j++)
-                    dest[j]  = pixels[j+(i*width())+color];
-            }
+            for (int j = 0; j < width(); j++)
+                dest[j] = pixels[j+(y*width())+color];
+            
         }
         
     } 
@@ -290,6 +297,9 @@ ratReader::scanline_engine(int y, int x, int xr, ChannelMask channels, Row& row)
     // Pointers to Nuke's channels:
     int Y = height() - y - 1;
     row.range(0, width());
+    #if defined(DEBUG)
+    iop->warning("Scanline engine active.");
+    #endif
     foreach(z, channels)
     {
         int rindex = rat_chan_index[z].first;
@@ -300,32 +310,30 @@ ratReader::scanline_engine(int y, int x, int xr, ChannelMask channels, Row& row)
         iop->warning("%s.%s writes to: %s", plane->getName(), plane->getComponentName(color), getName(z));
         #endif
 
-        float* dest = row.writable(z);
-        // Scanline loop:
-        for (int i = 0; i < Y; i++)
-        {
-            rat->readIntoBuffer(i, scanline, plane);
-            for (int j =0; j < width(); j++)
-                dest[j]  = scanline[j + (i*width()) + color];
-        }
+        float* dest = row.writable(z);  
+        rat->readIntoBuffer(height()-y, scanline, plane);
+        for (int j =0; j < width(); j++)
+            dest[j]  = scanline[j + color];
+        
     } 
+    lock.unlock();
 }
 
 ratReader::~ratReader() 
 {
-    rat->close();
-    if (rat)
-        delete rat; 
-    if (parms)
-        delete parms;
+    //rat->close();
+    //if (rat)
+    //    delete rat; 
+    //if (parms)
+    //    delete parms;
     if (loaded)
     {
-        for (int i=0; i<images.entries(); i++)
-            delete images(i);
+       // for (int i=0; i<images.entries(); i++)
+       //     delete images(i);
         #if defined(DEBUG)
-        iop->warning("Deleting images");
+        iop->warning("Leaking memory...");
         #endif
-        loaded = false;
+        //loaded = false;
     }
         
     //if (buffer)
