@@ -6,7 +6,8 @@
 # End Compiler Info Output
 # -Wall -W -Wno-parentheses -Wno-sign-compare -Wno-reorder -Wno-uninitialized -Wunused -Wno-unused-parameter -O2 -fno-strict-aliasing
 # -Wno-deprecated -Wall -W -Wno-parentheses -Wno-sign-compare -Wno-reorder -Wno-uninitialized -Wunused -Wno-unused-parameter
-NDKDIR ?= /opt/nuke
+#NDKDIR ?= /opt/nuke
+# Bellow assumes you have both $NDKDIR and $HT set properly in environment:
 MYCXX ?= g++
 LINK ?= g++
 CXXFLAGS ?= -g -c -DUSE_GLEW -DLINUX -I$(NDKDIR)/include -I$(HT)/include -msse -DAMD64 -m64 -fPIC -DSIZEOF_VOID_P=8 -DENABLE_THREADS -DUSE_PTHREADS -DSESI_LITTLE_ENDIAN -D_REENTRANT -D_FILE_OFFSET_BITS=64 -c -DGCC4 -DGCC3 -O2 -fno-strict-aliasing
