@@ -28,16 +28,16 @@ public:
     }
     ratReaderFormat()
     {
-        _use_scanline_engine = false;
-        _reverse_scanlines   = false;
+        _use_scanline_engine = true;
+        _reverse_scanlines   = true;
     }
     void knobs(Knob_Callback c)
     {
         Bool_knob(c, &_use_scanline_engine, "use_scanline_engine", "use scanline engine");
-        Tooltip(c, "Use either scanline or full raster engine to read data from *.rat files."
-                "Full raster should perform faster for the expanse of bigger memory consumption.");
+        Tooltip(c, "Use scanlines instead of full raster pre-load to read data from a *.rat file."
+                "Full raster should perform faster for the expense of memory consumption.");
         Bool_knob(c, &_reverse_scanlines, "reverse_scanlines", "reverse scanlines");
-        Tooltip(c, "Reverse the order of the scanlines in rat image.");
+        Tooltip(c, "Reverse the order of the scanlines from a rat image.");
     }
 
     void append(Hash& hash)
@@ -153,9 +153,10 @@ ratReader::ratReader(Read *r, int fd): Reader(r)
     else
         parms->orientImage(IMG_ORIENT_LEFT_FIRST, IMG_ORIENT_Y_NONE);
 
-    // Set rest of settings:
+    // Set rest of the settings:
     parms->setDataType(IMG_FLOAT);
-    parms->setInterleaved(IMG_NON_INTERLEAVED);
+    parms->setInterleaved(IMG_INTERLEAVED);
+    parms->setComponentOrder(IMG_COMPONENT_RGBA);
     
     // Create and open rat file, get stats:
     rat = IMG_File::open(r->filename(), parms);
@@ -165,6 +166,9 @@ ratReader::ratReader(Read *r, int fd): Reader(r)
     }
     const IMG_Stat &stat = rat->getStat();
     depth = 0;
+    #if defined(DEBUG)
+    iop->warning("Rat opened: %s", r->filename());
+    #endif
 
     // Since RAT can store varying bitdepth per plane, pixel-byte-algebra doesn't 
     // help in finding out a number of channels. We need to iterate over planes. 
@@ -222,16 +226,16 @@ ratReader::ratReader(Read *r, int fd): Reader(r)
 void
 ratReader::open()
 {
-    lock.lock();
-    #if defined(DEBUG)
-    iop->warning("About to open images: %s", rat->getStat().getFilename().buffer());
-    #endif
-
+    //lock.lock();
     if (!rat)
         iop->error("Rat is not opened.");
 
     if (!use_scanline_engine)
     {
+        #if defined(DEBUG)
+        iop->warning("About to load images: %s", rat->getStat().getFilename().buffer());
+        #endif
+
         loaded = rat->readImages(images);
         if(!loaded)
             iop->error("Can't load data from image: %s", rat->getStat().getFilename().buffer());
@@ -242,7 +246,7 @@ ratReader::open()
             #endif
         }
     }    
-    lock.unlock();
+    //lock.unlock();
 }
 
 void 
@@ -269,7 +273,6 @@ ratReader::raster_engine(int y, int x, int xr, ChannelMask channels, Row& row)
     int Y = height() - y - 1;
     row.range(0, width());        
  
-     //this->open();
     if (rat && loaded)
     {
         const IMG_Stat &stat = rat->getStat();
@@ -278,24 +281,46 @@ ratReader::raster_engine(int y, int x, int xr, ChannelMask channels, Row& row)
         #endif
         foreach(z, channels)
         {
-            int rindex = rat_chan_index[z].first;
-            int color  = rat_chan_index[z].second;
+            if (rat_chan_index.count(z) == 0)
+            {
+                #if defined(DEBUG)
+                iop->error("%s can't be found in rat_chan_index", getName(z));
+                #endif
+                continue;
+            }
+            int rindex  = rat_chan_index[z].first;
+            int color   = rat_chan_index[z].second;
+            int ncolors = IMGvectorSize((stat.getPlane(rindex))->getColorModel());
             PXL_Raster *raster  = images(rindex);
 
+            if (!raster)
+            {   
+                iop->error("Can't allocate the raster? %i", rindex);
+                continue;
+            }
+                
             #if defined(DEBUG)
-            iop->warning("%s.%s writes to: %s. Interleaved: %i", (stat.getPlane(rindex))->getName(), \
-                        (stat.getPlane(rindex))->getComponentName(color), getName(z), raster->isInterleaved());
+            iop->warning("%s.%s writes to: %s. Interleaved: %i, colors: %i", (stat.getPlane(rindex))->getName(), \
+                        (stat.getPlane(rindex))->getComponentName(color), getName(z), raster->isInterleaved(), ncolors);
             #endif
             
-            if (iop->aborted()) return;            
+            if (iop->aborted()) 
+            {
+                lock.unlock();
+                return;            
+            }
             float       *dest   = row.writable(z);
             const float *pixels = (const float*)raster->getPixels();
             for (int j = 0; j < width(); j++)
-                dest[j] = pixels[j+(Y*width())+(color*width()*height())];
-            
+            {
+                dest[j] = pixels[j*ncolors+(Y*width()*ncolors)+color];
+            }
         }
-        
     } 
+    else
+    {
+        iop->error("FATAL! At this time, rat and images should be allocated!");
+    }
     lock.unlock();
 }
 
@@ -314,22 +339,69 @@ ratReader::scanline_engine(int y, int x, int xr, ChannelMask channels, Row& row)
     #if defined(DEBUG)
     iop->warning("Scanline engine active.");
     #endif
+
+    std::map<std::string, Channel> usedChans;
+    std::map<Channel, Channel> toCopy;
+   
+
     foreach(z, channels)
     {
-        int rindex = rat_chan_index[z].first;
-        int color  = rat_chan_index[z].second;
+     if (rat_chan_index.count(z) == 0)
+        {
+            #if defined(DEBUG)
+            iop->error("%s can't be found in rat_chan_index", getName(z));
+            #endif
+            continue;
+        }
+        
+        if (usedChans.find(channel_map[z]) != usedChans.end()) 
+        {
+            #if defined(DEBUG)
+            iop->warning("%s is already used", getName(z));
+            #endif
+            toCopy[z] = usedChans[channel_map[z]];
+            continue;
+        }
+        usedChans[channel_map[z]] = z;
+
+        const int rindex = rat_chan_index[z].first;
+        const int color  = rat_chan_index[z].second;
         IMG_Plane *plane = stat.getPlane(rindex);
+        const int ncolors= IMGvectorSize(plane->getColorModel());
 
         #if defined(DEBUG)
         iop->warning("%s.%s writes to: %s", plane->getName(), plane->getComponentName(color), getName(z));
         #endif
+  
+        if (iop->aborted()) 
+        {
+            lock.unlock();
+            return;            
+        }
 
-        if (iop->aborted()) return;  
         float* dest = row.writable(z);  
         rat->readIntoBuffer(Y, scanline, plane);
         for (int j =0; j < width(); j++)
-            dest[j]  = scanline[j + color];
+            dest[j]  = scanline[j*ncolors + color];
         
+    }
+
+    foreach (z, channels)
+    {
+        if (toCopy.find(z) != toCopy.end())
+        {
+            #if defined(DEBUG)
+            iop->warning("%s is copied", getName(z));
+            #endif
+            
+            float* dest = row.writable(z);
+            const float* src = row[toCopy[z]];
+
+            for (int col = 0; col < width(); col++)
+            {
+                dest[col] = src[col];
+            }
+        }
     } 
     lock.unlock();
 }
@@ -339,7 +411,12 @@ ratReader::~ratReader()
     if (rat)
     {
         rat->close();
-        delete rat; 
+        delete rat;
+        rat = NULL; 
+        #if defined(DEBUG)
+        iop->warning("rat deleted...");
+        #endif
+
     }
 
     if (parms)
@@ -355,11 +432,12 @@ ratReader::~ratReader()
         loaded = false;
     }
         
-    //if (buffer)
-    //{
-    #if defined(DEBUG)
-    //    iop->warning("Deleting buffer");
-    #endif
-    //    delete (float*) buffer;
-    //}
+    if (buffer)
+    {
+        #if defined(DEBUG)
+        iop->warning("Deleting buffer");
+        #endif
+        delete (float*) buffer;
+        buffer = NULL;
+    }
 }
