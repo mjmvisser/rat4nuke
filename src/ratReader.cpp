@@ -9,6 +9,8 @@
 #include "IMG/IMG_FileParms.h"
 #include "PXL/PXL_Raster.h"
 #include "IMG/IMG_FileTypes.h"
+#include "UT/UT_WorkBuffer.h"
+#include "UT/UT_Options.h"
 
 using namespace DD::Image;
 
@@ -158,6 +160,25 @@ ratReader::ratReader(Read *r, int fd): Reader(r)
     
     // Create and open rat file, get stats:
     rat = IMG_File::open(r->filename(), parms);
+
+    // TODO: Meta data attempt:
+    #if defined(DEBUG)
+    UT_String info;
+    rat->getAdditionalInfo(info);
+    iop->warning("Rat info: %s\n", info.buffer());
+    for (int i = 0; i < rat->getNumOptions(); i++)
+    {
+        iop->warning("%s: %s\n", rat->getOptionName(i), rat->getOptionValue(i));
+    }
+    UT_SharedPtr<UT_Options> opt;
+    UT_WorkBuffer wbuf;
+    if (opt = rat->imageTextureOptions())
+    {
+        wbuf.strcpy("DSM Options: ");
+        opt->appendPyDictionary(wbuf);
+        iop->warning("Options %i: %s\n", opt->getNumOptions(), wbuf.buffer());
+    }
+    #endif
     if (!rat)
     {
         iop->error("Failed to open .rat file.");
@@ -176,7 +197,7 @@ ratReader::ratReader(Read *r, int fd): Reader(r)
 
         // The easiest yet not unequivocal way to determine 2d versus deep RAT files:
         if (!strcmp(plane->getName(), "Depth-Complexity"))
-            iop->error("Deep shadow/camera maps not supported.");
+            iop->warning("This seems to be deep shadow/camera map. ratReader will treat it as a 2d raster image ignoring deep pixels.");
 
         #if defined(DEBUG)
         iop->warning("Plane name: %s", plane->getName());
@@ -423,7 +444,6 @@ ratReader::~ratReader()
         #if defined(DEBUG)
         iop->warning("images deleted...");
         #endif
-        images = NULL;
         loaded = false;
     }
         
