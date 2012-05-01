@@ -125,7 +125,8 @@ ratReader::lookupChannels(std::set<Channel>& channel, const char* name)
         channel.insert(Chan_Z);
     else
     {
-        Channel ch = Reader::channel(name);
+        Channel ch = getChannel(name);
+        //Channel ch = Reader::channel(name);
         for (int i=0; i<20; i++) incr(ch);
         channel.insert(ch);
     }
@@ -136,6 +137,7 @@ ratReader::ratReader(Read *r, int fd): Reader(r)
     // Some read params have to be specified: 
     buffer = NULL;
     loaded = false;
+    rat    = NULL;
     use_scanline_engine = true;
     parms = new IMG_FileParms();
     
@@ -220,6 +222,14 @@ ratReader::ratReader(Read *r, int fd): Reader(r)
 void
 ratReader::open()
 {
+    lock.lock();
+    #if defined(DEBUG)
+    iop->warning("About to open images: %s", rat->getStat().getFilename().buffer());
+    #endif
+
+    if (!rat)
+        iop->error("Rat is not opened.");
+
     if (!use_scanline_engine)
     {
         loaded = rat->readImages(images);
@@ -231,7 +241,8 @@ ratReader::open()
             iop->warning("Image loaded: %s", rat->getStat().getFilename().buffer());
             #endif
         }
-    }
+    }    
+    lock.unlock();
 }
 
 void 
@@ -240,7 +251,11 @@ ratReader::engine(int y, int x, int xr, ChannelMask channels, Row& row)
     if (use_scanline_engine)
         scanline_engine(y, x, xr, channels, row);
     else
+    {
+        if (!loaded)
+            this->open();    
         raster_engine(y, x, xr, channels, row);
+    }
 }
 
 
@@ -249,16 +264,15 @@ ratReader::raster_engine(int y, int x, int xr, ChannelMask channels, Row& row)
 { 
     // Lock and allocate buffer:
     lock.lock();
-    const IMG_Stat &stat = rat->getStat();
 
     // Pointers to Nuke's channels:
     int Y = height() - y - 1;
-    row.range(0, width());
-    
-   
-        //this->open();
-    if (loaded)
+    row.range(0, width());        
+ 
+     //this->open();
+    if (rat && loaded)
     {
+        const IMG_Stat &stat = rat->getStat();
         #if defined(DEBUG)
         iop->warning("Raster engine active.");
         #endif
@@ -269,15 +283,15 @@ ratReader::raster_engine(int y, int x, int xr, ChannelMask channels, Row& row)
             PXL_Raster *raster  = images(rindex);
 
             #if defined(DEBUG)
-            //iop->warning("Write to %s", getName(z));
-            iop->warning("%s.%s writes to: %s", (stat.getPlane(rindex))->getName(), \
-                        (stat.getPlane(rindex))->getComponentName(color), getName(z));
+            iop->warning("%s.%s writes to: %s. Interleaved: %i", (stat.getPlane(rindex))->getName(), \
+                        (stat.getPlane(rindex))->getComponentName(color), getName(z), raster->isInterleaved());
             #endif
-
+            
+            if (iop->aborted()) return;            
             float       *dest   = row.writable(z);
             const float *pixels = (const float*)raster->getPixels();
             for (int j = 0; j < width(); j++)
-                dest[j] = pixels[j+(y*width())+color];
+                dest[j] = pixels[j+(Y*width())+(color*width()*height())];
             
         }
         
@@ -310,8 +324,9 @@ ratReader::scanline_engine(int y, int x, int xr, ChannelMask channels, Row& row)
         iop->warning("%s.%s writes to: %s", plane->getName(), plane->getComponentName(color), getName(z));
         #endif
 
+        if (iop->aborted()) return;  
         float* dest = row.writable(z);  
-        rat->readIntoBuffer(height()-y, scanline, plane);
+        rat->readIntoBuffer(Y, scanline, plane);
         for (int j =0; j < width(); j++)
             dest[j]  = scanline[j + color];
         
@@ -321,19 +336,23 @@ ratReader::scanline_engine(int y, int x, int xr, ChannelMask channels, Row& row)
 
 ratReader::~ratReader() 
 {
-    //rat->close();
-    //if (rat)
-    //    delete rat; 
-    //if (parms)
-    //    delete parms;
+    if (rat)
+    {
+        rat->close();
+        delete rat; 
+    }
+
+    if (parms)
+        delete parms;
+
     if (loaded)
     {
-       // for (int i=0; i<images.entries(); i++)
-       //     delete images(i);
+        for (int i=0; i<images.entries(); i++)
+            delete images(i);
         #if defined(DEBUG)
-        iop->warning("Leaking memory...");
+        iop->warning("images deleted...");
         #endif
-        //loaded = false;
+        loaded = false;
     }
         
     //if (buffer)
