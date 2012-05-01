@@ -34,7 +34,7 @@ public:
     void knobs(Knob_Callback c)
     {
         Bool_knob(c, &_use_scanline_engine, "use_scanline_engine", "use scanline engine");
-        Tooltip(c, "Use scanlines instead of full raster pre-load to read data from a *.rat file."
+        Tooltip(c, "Use scanlines instead of full raster pre-load to read data from a *.rat file. "
                 "Full raster should perform faster for the expense of memory consumption.");
         Bool_knob(c, &_reverse_scanlines, "reverse_scanlines", "reverse scanlines");
         Tooltip(c, "Reverse the order of the scanlines from a rat image.");
@@ -69,10 +69,10 @@ private:
 
     void *buffer;
     bool loaded;
-    int depth, xres, yres;
+    int  depth, xres, yres;
     bool use_scanline_engine;
     bool reverse_scanlines;
-    std::map<Channel, const char*> channel_map;
+    std::map<Channel, const char*>          channel_map;
     std::map<Channel, std::pair<int, int> > rat_chan_index;
 
     MetaData::Bundle _meta;
@@ -100,7 +100,6 @@ ReaderFormat* buildformat(Read* iop)
 const 
 Reader::Description ratReader::d("rat\0", build, test, buildformat);
 
-// This is from NDK exrReader.cpp example
 void 
 ratReader::lookupChannels(std::set<Channel>& channel, const char* name)
 {
@@ -126,15 +125,13 @@ ratReader::lookupChannels(std::set<Channel>& channel, const char* name)
     else
     {
         Channel ch = getChannel(name);
-        //Channel ch = Reader::channel(name);
-        for (int i=0; i<20; i++) incr(ch);
         channel.insert(ch);
     }
 }
 
 ratReader::ratReader(Read *r, int fd): Reader(r)
 {
-    // Some read params have to be specified: 
+    // Init: 
     buffer = NULL;
     loaded = false;
     rat    = NULL;
@@ -153,7 +150,8 @@ ratReader::ratReader(Read *r, int fd): Reader(r)
     else
         parms->orientImage(IMG_ORIENT_LEFT_FIRST, IMG_ORIENT_Y_NONE);
 
-    // Set rest of the settings:
+    // Set some of the settings, which are assumed currently by both ::engines. 
+    // Leaving them as they are would require some serious switches in logic bellow.
     parms->setDataType(IMG_FLOAT);
     parms->setInterleaved(IMG_INTERLEAVED);
     parms->setComponentOrder(IMG_COMPONENT_RGBA);
@@ -170,49 +168,58 @@ ratReader::ratReader(Read *r, int fd): Reader(r)
     iop->warning("Rat opened: %s", r->filename());
     #endif
 
-    // Since RAT can store varying bitdepth per plane, pixel-byte-algebra doesn't 
+    // Since RAT can store varying bitdepth per plane, pixel-byte algebra doesn't 
     // help in finding out a number of channels. We need to iterate over planes. 
     for (int i = 0; i < stat.getNumPlanes(); i++)
     {
         IMG_Plane *plane = stat.getPlane(i);
+
         // The easiest yet not unequivocal way to determine 2d versus deep RAT files:
         if (!strcmp(plane->getName(), "Depth-Complexity"))
             iop->error("Deep shadow/camera maps not supported.");
+
         #if defined(DEBUG)
         iop->warning("Plane name: %s", plane->getName());
         #endif
         depth += IMGvectorSize(plane->getColorModel()); 
     } 
 
-    // For each channel in the file, create or locate the matching Nuke channel
-    // number, and store it in the channel_map
     ChannelSet mask;
-    std::set<Channel> channels;
-    std::set<Channel>::iterator it;
     for (int i = 0; i < stat.getNumPlanes(); i++)
     {
         IMG_Plane *plane = stat.getPlane(i);
-        int        nchan = IMGvectorSize(plane->getColorModel());
+        const int  nchan = IMGvectorSize(plane->getColorModel());
 
         for (int j = 0; j < nchan; j++)
         {
-            std::string chan_name;
             std::string chan = std::string(plane->getComponentName(j) ? plane->getComponentName(j): "r"); 
-            if      (chan == "r") chan = "red";
+
+            if      (chan == "r") chan = "red"; 
             else if (chan == "g") chan = "green";
-            else if (chan == "b") chan = "blue";
+            else if (chan == "b") chan = "blue"; 
             else if (chan == "a") chan = "alpha";
-            chan_name = std::string(plane->getName()) + std::string(".") + chan;
+
+            std::string chan_name = std::string(plane->getName()) + std::string(".") + chan;
+            std::set<Channel> channels;
             lookupChannels(channels, chan_name.c_str());
-            it = channels.end();
-            Channel channel     = *it;
-            channel_map[channel]= chan_name.c_str();
-            std::pair<int, int> idx(i, j);
-            rat_chan_index[channel] = idx;
-            #if defined(DEBUG)
-            iop->warning("Rat %s (%i,%i) becomes %s", chan_name.c_str(), i, j, getName(channel));
-            #endif
-            mask += channel;
+
+            if (!channels.empty()) 
+            {
+                for (std::set<Channel>::iterator it = channels.begin(); it != channels.end(); it++) 
+                {
+                    Channel channel = *it;
+                    channel_map[channel]= chan_name.c_str();
+                    std::pair<int, int> idx(i, j);
+                    rat_chan_index[channel] = idx;
+                     
+                    #if defined(DEBUG)
+                    iop->warning("Rat %s (%i,%i) becomes %s", chan_name.c_str(), i, j, getName(channel));
+                    #endif
+                    mask += channel;
+                }
+            }
+            else
+                iop->warning("Can't create a channel from %s", chan_name.c_str());
         }
     }
     // Set info:
@@ -226,7 +233,6 @@ ratReader::ratReader(Read *r, int fd): Reader(r)
 void
 ratReader::open()
 {
-    //lock.lock();
     if (!rat)
         iop->error("Rat is not opened.");
 
@@ -246,7 +252,6 @@ ratReader::open()
             #endif
         }
     }    
-    //lock.unlock();
 }
 
 void 
@@ -266,10 +271,7 @@ ratReader::engine(int y, int x, int xr, ChannelMask channels, Row& row)
 void 
 ratReader::raster_engine(int y, int x, int xr, ChannelMask channels, Row& row) 
 { 
-    // Lock and allocate buffer:
     lock.lock();
-
-    // Pointers to Nuke's channels:
     int Y = height() - y - 1;
     row.range(0, width());        
  
@@ -327,13 +329,11 @@ ratReader::raster_engine(int y, int x, int xr, ChannelMask channels, Row& row)
 void 
 ratReader::scanline_engine(int y, int x, int xr, ChannelMask channels, Row& row) 
 { 
-    // Lock and allocate buffer:
     lock.lock();
     IMG_Stat &stat = rat->getStat();
     buffer = rat->allocScanlineBuffer();
     float *scanline = (float *)buffer;
 
-    // Pointers to Nuke's channels:
     int Y = height() - y - 1;
     row.range(0, width());
     #if defined(DEBUG)
@@ -342,15 +342,12 @@ ratReader::scanline_engine(int y, int x, int xr, ChannelMask channels, Row& row)
 
     std::map<std::string, Channel> usedChans;
     std::map<Channel, Channel> toCopy;
-   
 
     foreach(z, channels)
     {
-     if (rat_chan_index.count(z) == 0)
+        if (rat_chan_index.count(z) == 0)
         {
-            #if defined(DEBUG)
             iop->error("%s can't be found in rat_chan_index", getName(z));
-            #endif
             continue;
         }
         
@@ -382,8 +379,7 @@ ratReader::scanline_engine(int y, int x, int xr, ChannelMask channels, Row& row)
         float* dest = row.writable(z);  
         rat->readIntoBuffer(Y, scanline, plane);
         for (int j =0; j < width(); j++)
-            dest[j]  = scanline[j*ncolors + color];
-        
+            dest[j]  = scanline[j*ncolors + color]; 
     }
 
     foreach (z, channels)
@@ -394,9 +390,8 @@ ratReader::scanline_engine(int y, int x, int xr, ChannelMask channels, Row& row)
             iop->warning("%s is copied", getName(z));
             #endif
             
-            float* dest = row.writable(z);
+            float* dest      = row.writable(z);
             const float* src = row[toCopy[z]];
-
             for (int col = 0; col < width(); col++)
             {
                 dest[col] = src[col];
@@ -416,7 +411,6 @@ ratReader::~ratReader()
         #if defined(DEBUG)
         iop->warning("rat deleted...");
         #endif
-
     }
 
     if (parms)
@@ -429,6 +423,7 @@ ratReader::~ratReader()
         #if defined(DEBUG)
         iop->warning("images deleted...");
         #endif
+        images = NULL;
         loaded = false;
     }
         
