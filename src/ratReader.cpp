@@ -45,6 +45,7 @@ public:
     void append(Hash& hash)
     {
         hash.append(_use_scanline_engine);
+        hash.append(_reverse_scanlines);
     }
 };
 
@@ -187,7 +188,7 @@ ratReader::ratReader(Read *r, int fd): Reader(r)
     iop->warning("Rat info: %s\n", info.buffer());
     for (int i = 0; i < rat->getNumOptions(); i++)
     {
-        iop->warning("%s: %s\n", rat->getOptionName(i), rat->getOptionValue(i));
+        iop->warning("%s: %s", rat->getOptionName(i), rat->getOptionValue(i));
     }
     UT_SharedPtr<UT_Options> opt;
     UT_WorkBuffer wbuf;
