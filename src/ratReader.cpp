@@ -62,7 +62,8 @@ public:
     void   raster_engine(int y, int x, int r, ChannelMask, Row &);
     void scanline_engine(int y, int x, int r, ChannelMask, Row &);    
     void lookupChannels(std::set<Channel>& channel, const char* name);
-    static const Reader::Description d;
+    static const Reader::Description drat;
+    static const Reader::Description dpic;
 
 private:
     IMG_File *rat;
@@ -81,14 +82,15 @@ private:
     Lock lock;
 };
 
+// RAT:
 static bool 
-test(int fd, const unsigned char* block, int length)
+test_rat(int fd, const unsigned char* block, int length)
 {
     return block[0] == 'f' && block[1] == 'b' && block[2] == 't' && block[3] == 'H';
 }
 
 static 
-Reader* build(Read* iop, int fd, const unsigned char* b, int n)
+Reader* build_rat(Read* iop, int fd, const unsigned char* b, int n)
 {
     return new ratReader(iop, fd);
 }
@@ -100,7 +102,24 @@ ReaderFormat* buildformat(Read* iop)
 }
 
 const 
-Reader::Description ratReader::d("rat\0", build, test, buildformat);
+Reader::Description ratReader::drat("rat\0", build_rat, test_rat, buildformat);
+
+// PIC:
+static bool 
+test_pic(int fd, const unsigned char* block, int length)
+{
+    return block[0] == 'P' && block[1] == 'I' && block[2] == 'C' && block[3] == '2';
+}
+
+static 
+Reader* build_pic(Read* iop, int fd, const unsigned char* b, int n)
+{
+    return new ratReader(iop, fd);
+}
+
+const 
+Reader::Description ratReader::dpic("pic\0", build_pic, test_pic, buildformat);
+
 
 void 
 ratReader::lookupChannels(std::set<Channel>& channel, const char* name)
@@ -197,7 +216,7 @@ ratReader::ratReader(Read *r, int fd): Reader(r)
 
         // The easiest yet not unequivocal way to determine 2d versus deep RAT files:
         if (!strcmp(plane->getName(), "Depth-Complexity"))
-            iop->warning("This seems to be deep shadow/camera map. ratReader will treat it as a 2d raster image ignoring deep pixels.");
+            iop->warning("ratReader will treat DCM files as a 2d images! (ignoring deep pixels)");
 
         #if defined(DEBUG)
         iop->warning("Plane name: %s", plane->getName());
@@ -278,6 +297,7 @@ ratReader::open()
 void 
 ratReader::engine(int y, int x, int xr, ChannelMask channels, Row& row) 
 {
+    lock.lock();
     if (use_scanline_engine)
         scanline_engine(y, x, xr, channels, row);
     else
@@ -286,13 +306,14 @@ ratReader::engine(int y, int x, int xr, ChannelMask channels, Row& row)
             this->open();    
         raster_engine(y, x, xr, channels, row);
     }
+    lock.unlock();
 }
 
 
 void 
 ratReader::raster_engine(int y, int x, int xr, ChannelMask channels, Row& row) 
 { 
-    lock.lock();
+    //lock.lock();
     int Y = height() - y - 1;
     row.range(0, width());        
  
@@ -344,13 +365,13 @@ ratReader::raster_engine(int y, int x, int xr, ChannelMask channels, Row& row)
     {
         iop->error("FATAL! At this time, rat and images should be allocated!");
     }
-    lock.unlock();
+    //lock.unlock();
 }
 
 void 
 ratReader::scanline_engine(int y, int x, int xr, ChannelMask channels, Row& row) 
 { 
-    lock.lock();
+    //lock.lock();
     IMG_Stat &stat = rat->getStat();
     buffer = rat->allocScanlineBuffer();
     float *scanline = (float *)buffer;
@@ -371,7 +392,7 @@ ratReader::scanline_engine(int y, int x, int xr, ChannelMask channels, Row& row)
             iop->error("%s can't be found in rat_chan_index", getName(z));
             continue;
         }
-        
+        #if 0
         if (usedChans.find(channel_map[z]) != usedChans.end()) 
         {
             #if defined(DEBUG)
@@ -381,6 +402,7 @@ ratReader::scanline_engine(int y, int x, int xr, ChannelMask channels, Row& row)
             continue;
         }
         usedChans[channel_map[z]] = z;
+        #endif
 
         const int rindex = rat_chan_index[z].first;
         const int color  = rat_chan_index[z].second;
@@ -402,7 +424,7 @@ ratReader::scanline_engine(int y, int x, int xr, ChannelMask channels, Row& row)
         for (int j =0; j < width(); j++)
             dest[j]  = scanline[j*ncolors + color]; 
     }
-
+    #if 0
     foreach (z, channels)
     {
         if (toCopy.find(z) != toCopy.end())
@@ -419,7 +441,8 @@ ratReader::scanline_engine(int y, int x, int xr, ChannelMask channels, Row& row)
             }
         }
     } 
-    lock.unlock();
+    #endif
+    //lock.unlock();
 }
 
 ratReader::~ratReader() 
