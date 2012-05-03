@@ -17,11 +17,11 @@ endif
 LINKFLAGS ?= -L$(NDKDIR) -L$(HFS)/dsolib
 LIBS ?= -lDDImage -lHoudiniUI -lHoudiniOPZ -lHoudiniOP3 -lHoudiniOP2 -lHoudiniOP1 -lHoudiniUT -lHoudiniPRM -lpthread
 LINKFLAGS += -shared
-all: ratReader.so
+all: ratReader.so ratReaderDeep.so
 .PRECIOUS : %.os
 %.os: %.cpp
 	$(MYCXX) $(CXXFLAGS) -o $(@) $<
 %.so: %.os
 	$(LINK) $(LINKFLAGS) $(LIBS) -o $(@) $<
 clean:
-	rm -rf *.os ratReader.so
+	rm -rf *.os ratReader.so ratReaderDeep.so
