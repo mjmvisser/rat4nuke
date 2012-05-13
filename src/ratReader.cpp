@@ -217,7 +217,7 @@ ratReader::ratReader(Read *r, int fd): Reader(r)
 
         // The easiest yet not unequivocal way to determine 2d versus deep RAT files:
         if (!strcmp(plane->getName(), "Depth-Complexity"))
-            iop->warning("ratReader will treat DCM files as a 2d images! (ignoring deep pixels)");
+            iop->warning("ratReader will treat DCM files as a 2d images. (ignoring deep pixels)");
 
         #if defined(DEBUG)
         iop->warning("Plane name: %s", plane->getName());

@@ -85,18 +85,63 @@ public:
 
 class ratDeepReader : public DeepReader
 {
-    static Lock sLibraryLock;
     IMG_DeepShadow *rat;
-    Lock lock;
     int  xres, yres, nchannels;
+
     DD::Image::OutputContext outputContext;
+    DD::Image::Knob* rawKnob;
+    DD::Image::Knob* discreteKnob;
+    DD::Image::Knob* premultKnob;
+    DD::Image::Knob* compositeKnob;
+    static Lock sLibraryLock;
+    Lock lock;
+
+    bool raw;
+    bool discrete;
+    bool premult;
+    bool composite;
+
+    std::map<Channel, const char*>          channel_map;
+    std::map<Channel, std::pair<int, int> > rat_chan_index;
+
 
 public:
+void
+lookupChannels(std::set<Channel>& channel, const char* name)
+{
+   
+         if (strcmp(name, "C.red") == 0)
+        channel.insert(Chan_Red);
+    else if (strcmp(name, "C.green") == 0)
+        channel.insert(Chan_Green);
+    else if (strcmp(name, "C.blue") == 0)
+        channel.insert(Chan_Blue);
+    else if (strcmp(name, "C.alpha") == 0)
+        channel.insert(Chan_Alpha);
+    else if (strcmp(name, "Pz.red") == 0)
+        channel.insert(Chan_Z);
+    else
+    {
+        Channel ch = getChannel(name);
+        channel.insert(ch);
+    }
+}
 ratDeepReader(DeepReaderOwner* op, const std::string& filename) : DeepReader(op)
 {
-    rat = NULL;
+    rat           = NULL;
+    rawKnob       = _op->knob("raw");
+    discreteKnob  = _op->knob("discrete");
+    premultKnob   = _op->knob("premult");
+    compositeKnob = _op->knob("composite");
+
+    raw       = rawKnob       ? rawKnob->get_value() : false;
+    discrete  = discreteKnob  ? discreteKnob->get_value() : false;
+    premult   = premultKnob   ? premultKnob->get_value() : false;
+    composite = compositeKnob ? compositeKnob->get_value() : false;
+
     if (!filename.length())
         return;
+
     outputContext = _owner->readerOutputContext();
 
     rat = new IMG_DeepShadow();
@@ -104,13 +149,61 @@ ratDeepReader(DeepReaderOwner* op, const std::string& filename) : DeepReader(op)
         return;
 
     #if defined(DEBUG)
-    _op->warning("rat opened");
+    _op->warning("RAT opened");
     #endif
 
-    rat->resolution(xres, yres);
-    nchannels = rat->getChannelCount();
+    for (int i = 0; i < rat->getChannelCount(); i++)
+    {
+        const IMG_DeepShadowChannel *chp;
+        chp = rat->getChannel(i);
+        nchannels += chp->getTupleSize();
 
-    setInfo(xres, yres, outputContext, Mask_RGB | Mask_Alpha | Mask_Deep);
+        #if defined(DEBUG)
+        _op->warning("Channel name: %s, size: %i", chp->getName(), chp->getTupleSize());
+        #endif
+    } 
+
+    ChannelSet mask;
+    for (int i = 0; i < rat->getChannelCount(); i++)
+    {
+        const IMG_DeepShadowChannel *chp;
+        chp = rat->getChannel(i);
+        const int nchan = chp->getTupleSize();
+
+        for (int j = 0; j < nchan; j++)
+        {
+            std::string chan = "";
+            if      (j == 0) chan = "red"; 
+            else if (j == 1) chan = "green";
+            else if (j == 2) chan = "blue"; 
+            else if (j == 3) chan = "alpha";
+
+            std::string chan_name = std::string(chp->getName()) + std::string(".") + chan;
+            std::set<Channel> channels;
+            lookupChannels(channels, chan_name.c_str());
+
+            if (!channels.empty()) 
+            {
+                for (std::set<Channel>::iterator it = channels.begin(); it != channels.end(); it++) 
+                {
+                    Channel channel = *it;
+                    channel_map[channel]= chan_name.c_str();
+                    std::pair<int, int> idx(i, j);
+                    rat_chan_index[channel] = idx;
+                     
+                    #if defined(DEBUG)
+                    _op->warning("Rat %s (%i,%i) becomes %s", chan_name.c_str(), i, j, getName(channel));
+                    #endif
+                    mask += channel;
+                }
+            }
+            else
+                _op->warning("Can't create a channel from %s", chan_name.c_str());
+        }
+    }
+
+    rat->resolution(xres, yres);
+    setInfo(xres, yres, outputContext, mask);
 
     //_metaData.setData("dtex/np", NP, 16);
     //_metaData.setData("dtex/nl", Nl, 16);
@@ -124,7 +217,7 @@ ratDeepReader(DeepReaderOwner* op, const std::string& filename) : DeepReader(op)
         rat = NULL;
             
         #if defined(DEBUG)
-        _op->warning("rat deleted");
+        _op->warning("RAT deleted");
         #endif
     }
 }
@@ -139,9 +232,10 @@ doDeepEngine(DD::Image::Box box, const ChannelSet& channels, DeepOutputPlane& pl
     if (!rat)
         _op->error("error opening file");
  
-    const IMG_DeepShadowChannel *cp;
-    const IMG_DeepShadowChannel *zp;
-    const IMG_DeepShadowChannel *op;
+    const IMG_DeepShadowChannel *chp;
+    const IMG_DeepShadowChannel *Pzp;
+    const IMG_DeepShadowChannel *Ofp;
+    Pzp = NULL; Ofp = NULL;
     IMG_DeepPixelReader pixel(*rat);
 
      #if defined(DEBUG)
@@ -151,47 +245,24 @@ doDeepEngine(DD::Image::Box box, const ChannelSet& channels, DeepOutputPlane& pl
     int height = yres;
     plane = DeepOutputPlane(channels, box);
 
-    DD::Image::Knob* rawKnob       = _op->knob("raw");
-    DD::Image::Knob* discreteKnob  = _op->knob("discrete");
-    DD::Image::Knob* premultKnob   = _op->knob("premult");
-    DD::Image::Knob* compositeKnob = _op->knob("composite");
-    bool raw       = rawKnob       ? rawKnob->get_value() : false;
-    bool discrete  = discreteKnob  ? discreteKnob->get_value() : false;
-    bool premult   = premultKnob   ? premultKnob->get_value() : false;
-    bool composite = compositeKnob ? compositeKnob->get_value() : false;
+     #if defined(DEBUG)
+    _op->warning("Plane created.");
+    #endif
 
-    // TODO: RGBA for now only:
-    std::map<Channel, int> channel_map;
-    if (nchannels) // if (nchannels == 4)
+    for (int i = 0; i < rat->getChannelCount(); i++)
     {
-        channel_map[Chan_Red] = 0;
-        channel_map[Chan_Green] = 1;
-        channel_map[Chan_Blue] = 2;
-        channel_map[Chan_Alpha] = 3;
-        //channel_map[Chan_Z] = 4;
-        //raw = true;
-    } 
-    else 
-        _op->error("Can't find any channels");// chanMap[Chan_Alpha] = 0;
-
-    zp = NULL; 
-    cp = NULL;
-    op = NULL;
-
-    for (int i = 0; i < nchannels; i++)
-    {
-        if (strcmp(rat->getChannel(i)->getName(), "C") == 0)
-            cp = rat->getChannel(i);
-        else if (strcmp(rat->getChannel(i)->getName(), "Pz") == 0)
-            zp = rat->getChannel(i);
+        if (strcmp(rat->getChannel(i)->getName(), "Pz") == 0)
+            Pzp = rat->getChannel(i);
         else if (strcmp(rat->getChannel(i)->getName(), "Of") == 0)
-            op = rat->getChannel(i);
-
-        #if defined(DEBUG)
-        if (cp && zp)
-            _op->warning("Found channels: %s, %s", cp->getName(), zp->getName());
-        #endif
+            Ofp = rat->getChannel(i);
     }
+
+    if (!Pzp || !Ofp)
+            _op->error("Can't find Of or Pz channels! Is it really a DCM file?");
+    #if defined(DEBUG)
+    else
+        _op->warning("Of and Pz have been found.");
+    #endif
 
     #if defined(DEBUG)
     _op->warning("channels.size(): %i", channels.size());
@@ -206,68 +277,41 @@ doDeepEngine(DD::Image::Box box, const ChannelSet& channels, DeepOutputPlane& pl
         float x = it.x;
         float y = it.y;
         outputContext.from_proxy_xy(x, y);
-        // reverse scanlines:
-        //y = height - y - 1;
 
         pixel.open(x, y);
 
         if (!composite)
-            pixel.uncomposite(*zp, *op, false);
+            pixel.uncomposite(*Pzp, *Ofp, false);
 
         int numpts = pixel.getDepth();
-
-        DeepOutPixel pels(numpts * 6);// FIXME: channels.size()  
-
-        const float *color;
-        const float *color2;
-        const float *zdepth;
-        const float *zdepth2;
-        const float *Of;
-
+        DeepOutPixel pels(numpts * channels.size()); 
+    
         for (int i = 0; i < numpts; i++)
         {
-            color  = pixel.getData(*cp, i);
-            zdepth = pixel.getData(*zp, i);
-            Of     = pixel.getData(*op, i); 
-            float alpha = 1;
+            const float *Pz;
+            const float *Cf;
 
-            if (0) //TODO: always raw
-            {
-                if (i == numpts-1)
-                    continue;
-
-                color2  = pixel.getData(*cp, i+1);
-                zdepth2 = pixel.getData(*zp, i+1);
-                alpha   = (color[3] - color2[3]) / color[3];
-
-                if (color[3] == color2[3])
-                    continue;
-
-                if (discrete)
-                    zdepth2 = zdepth;
-            }
-            else
-            {
-                zdepth2 = zdepth;
-                alpha   = color[3];
-            }
-                
             foreach(chan, channels)
             {
+                int rindex  = rat_chan_index[chan].first;
+                int cindex  = rat_chan_index[chan].second;
+                chp         = rat->getChannel(rindex);
+
+                if (chan == Chan_Z || chan == Chan_DeepFront || chan == Chan_DeepBack)
+                    Pz = pixel.getData(*Pzp, i);
                 if (chan == Chan_Z)
-                    pels.push_back(1/zdepth[0]);
+                    pels.push_back(1/Pz[0]);
                 else if (chan == Chan_DeepFront )
-                    pels.push_back(zdepth[0]);
+                    pels.push_back(Pz[0]);
                 else if ( chan == Chan_DeepBack )
-                    pels.push_back(zdepth2[0]);
-                else if (chan == Chan_Alpha)
-                    pels.push_back(alpha);
+                    pels.push_back(Pz[0]);
                 else if (channel_map.count(chan))
                 {
+                    Cf = pixel.getData(*chp, i);
                     if (premult && IsRGB(chan) && channel_map.count(Chan_Alpha))
-                        pels.push_back(color[channel_map[chan]] * alpha);
+                        pels.push_back(Cf[cindex] * Cf[3]);
                     else 
-                        pels.push_back(color[channel_map[chan]]);
+                        pels.push_back(Cf[cindex]);
                 }
             }
         }
