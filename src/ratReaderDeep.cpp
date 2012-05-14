@@ -214,6 +214,7 @@ ratDeepReader(DeepReaderOwner* op, const std::string& filename) : DeepReader(op)
     if (rat) 
     {
         rat->close();
+        delete rat;
         rat = NULL;
             
         #if defined(DEBUG)
@@ -259,12 +260,14 @@ doDeepEngine(DD::Image::Box box, const ChannelSet& channels, DeepOutputPlane& pl
 
     if (!Pzp || !Ofp)
             _op->error("Can't find Of or Pz channels! Is it really a DCM file?");
+
     #if defined(DEBUG)
     else
         _op->warning("Of and Pz have been found.");
     #endif
 
-    #if defined(DEBUG)
+    #if 0 
+    //defined(DEBUG)
     _op->warning("channels.size(): %i", channels.size());
     printf("Channels: ");
     foreach(chan, channels)   
