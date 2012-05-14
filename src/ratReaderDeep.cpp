@@ -5,6 +5,9 @@
 #include "DDImage/Thread.h"
 // HDK:
 #include "IMG/IMG_DeepShadow.h"
+#include "UT/UT_Options.h"
+#include "UT/UT_Matrix4.h"
+#include "UT/UT_Vector2.h"
 
 using namespace DD::Image;
 
@@ -204,6 +207,52 @@ ratDeepReader(DeepReaderOwner* op, const std::string& filename) : DeepReader(op)
 
     rat->resolution(xres, yres);
     setInfo(xres, yres, outputContext, mask);
+
+    // Metadatas:
+    const UT_Options *opt = rat->getTBFOptions();
+    for (int i =0; i < opt->getNumOptions(); i++)
+    {
+        const char *name = opt->getOptionName(i);
+        const UT_OptionType type = opt->getOptionType(i);
+
+        #if defined(DEBUG)
+        UT_String buff;
+        opt->getOptionString(name, buff);
+        printf("Option %s: value: %s\n", name, buff.buffer());
+        #endif
+
+        if (type == UT_OPTION_MATRIX4)
+        {
+            const UT_Matrix4D mat = opt->getOptionM4(name);
+            _metaData.setData(name, mat.data(), 16);
+        }
+        else if (type == UT_OPTION_STRING)
+        {
+            const std::string str = opt->getOptionS(name);
+            _metaData.setData(name, str);
+        }
+        else if (type == UT_OPTION_FPREAL)
+        {
+            const double d = opt->getOptionF(name);
+            _metaData.setData(name, d);
+        }
+        else if (type == UT_OPTION_VECTOR2)
+        {
+            const UT_Vector2D d = opt->getOptionV2(name);
+            _metaData.setData(name, d.data(), 2);
+        }
+        else if (type == UT_OPTION_VECTOR3)
+        {
+            const UT_Vector3D d = opt->getOptionV3(name);
+            _metaData.setData(name, d.data(), 3);
+        }
+    }
+
+    UT_Matrix4 mat;
+    if (rat->getWorldToNDC(mat, true))
+        _metaData.setData("space:worldtoNDC", mat.data(), 16);
+    if (rat->getCameraToNDC(mat, true))
+        _metaData.setData("space:cameratoNDC", mat.data(), 16);
 
     //_metaData.setData("dtex/np", NP, 16);
     //_metaData.setData("dtex/nl", Nl, 16);
