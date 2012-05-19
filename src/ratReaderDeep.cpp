@@ -136,12 +136,7 @@ ratDeepReader(DeepReaderOwner* op, const std::string& filename) : DeepReader(op)
     discreteKnob  = _op->knob("discrete");
     premultKnob   = _op->knob("premult");
     compositeKnob = _op->knob("composite");
-
-    raw       = rawKnob       ? rawKnob->get_value() : false;
-    discrete  = discreteKnob  ? discreteKnob->get_value() : false;
-    premult   = premultKnob   ? premultKnob->get_value() : false;
-    composite = compositeKnob ? compositeKnob->get_value() : false;
-
+  
     if (!filename.length())
         return;
 
@@ -205,6 +200,7 @@ ratDeepReader(DeepReaderOwner* op, const std::string& filename) : DeepReader(op)
         }
     }
 
+    mask += Mask_Deep;
     rat->resolution(xres, yres);
     setInfo(xres, yres, outputContext, mask);
 
@@ -253,9 +249,6 @@ ratDeepReader(DeepReaderOwner* op, const std::string& filename) : DeepReader(op)
         _metaData.setData("space:worldtoNDC", mat.data(), 16);
     if (rat->getCameraToNDC(mat, true))
         _metaData.setData("space:cameratoNDC", mat.data(), 16);
-
-    //_metaData.setData("dtex/np", NP, 16);
-    //_metaData.setData("dtex/nl", Nl, 16);
 }
 
 ~ratDeepReader()
@@ -281,11 +274,18 @@ doDeepEngine(DD::Image::Box box, const ChannelSet& channels, DeepOutputPlane& pl
     Guard g(lock);
     if (!rat)
         _op->error("error opening file");
+
+    raw       = rawKnob ? rawKnob->get_value() : false;
+    discrete  = discreteKnob ? discreteKnob->get_value() : false;
+    premult   = premultKnob ? premultKnob->get_value() : false;
+    composite = compositeKnob ? compositeKnob->get_value() : false;
  
     const IMG_DeepShadowChannel *chp;
     const IMG_DeepShadowChannel *Pzp;
     const IMG_DeepShadowChannel *Ofp;
-    Pzp = NULL; Ofp = NULL;
+    Pzp = NULL; 
+    Ofp = NULL;
+
     IMG_DeepPixelReader pixel(*rat);
 
      #if defined(DEBUG)
@@ -313,15 +313,6 @@ doDeepEngine(DD::Image::Box box, const ChannelSet& channels, DeepOutputPlane& pl
     #if defined(DEBUG)
     else
         _op->warning("Of and Pz have been found.");
-    #endif
-
-    #if 0 
-    //defined(DEBUG)
-    _op->warning("channels.size(): %i", channels.size());
-    printf("Channels: ");
-    foreach(chan, channels)   
-        printf("%s, ", getName(chan));
-    printf("\n");
     #endif
 
     for (Box::iterator it = box.begin(); it != box.end(); it++)

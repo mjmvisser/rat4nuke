@@ -1,12 +1,3 @@
-# Compiler Info ('g++-4.1 --version')
-# g++-4.1 (GCC) 4.1.2 20080704 (Red Hat 4.1.2-46)
-# Copyright (C) 2006 Free Software Foundation, Inc.
-# This is free software; see the source for copying conditions.  There is NO
-# warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-# End Compiler Info Output
-# -Wall -W -Wno-parentheses -Wno-sign-compare -Wno-reorder -Wno-uninitialized -Wunused -Wno-unused-parameter -O2 -fno-strict-aliasing
-# -Wno-deprecated -Wall -W -Wno-parentheses -Wno-sign-compare -Wno-reorder -Wno-uninitialized -Wunused -Wno-unused-parameter
-#NDKDIR ?= /opt/nuke
 # Bellow assumes you have both $NDKDIR and $HT set properly in environment:
 MYCXX ?= g++
 LINK ?= g++
