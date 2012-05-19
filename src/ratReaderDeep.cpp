@@ -38,7 +38,7 @@ public:
     {
         _raw      = false;
         _premult  = false;
-        _discrete = false;
+        _discrete = true;
         _composite= false;
     }
 
@@ -276,13 +276,14 @@ doDeepEngine(DD::Image::Box box, const ChannelSet& channels, DeepOutputPlane& pl
         _op->error("error opening file");
 
     raw       = rawKnob ? rawKnob->get_value() : false;
-    discrete  = discreteKnob ? discreteKnob->get_value() : false;
+    discrete  = discreteKnob ? discreteKnob->get_value() : true;
     premult   = premultKnob ? premultKnob->get_value() : false;
     composite = compositeKnob ? compositeKnob->get_value() : false;
  
     const IMG_DeepShadowChannel *chp;
     const IMG_DeepShadowChannel *Pzp;
     const IMG_DeepShadowChannel *Ofp;
+    int   Of_index = 0;
     Pzp = NULL; 
     Ofp = NULL;
 
@@ -304,12 +305,14 @@ doDeepEngine(DD::Image::Box box, const ChannelSet& channels, DeepOutputPlane& pl
         if (strcmp(rat->getChannel(i)->getName(), "Pz") == 0)
             Pzp = rat->getChannel(i);
         else if (strcmp(rat->getChannel(i)->getName(), "Of") == 0)
+        {
             Ofp = rat->getChannel(i);
+            Of_index = i;
+        }
     }
 
     if (!Pzp || !Ofp)
             _op->error("Can't find Of or Pz channels! Is it really a DCM file?");
-
     #if defined(DEBUG)
     else
         _op->warning("Of and Pz have been found.");
@@ -332,6 +335,7 @@ doDeepEngine(DD::Image::Box box, const ChannelSet& channels, DeepOutputPlane& pl
         for (int i = 0; i < numpts; i++)
         {
             const float *Pz;
+            const float *Pz2;
             const float *Cf;
 
             foreach(chan, channels)
@@ -341,13 +345,22 @@ doDeepEngine(DD::Image::Box box, const ChannelSet& channels, DeepOutputPlane& pl
                 chp         = rat->getChannel(rindex);
 
                 if (chan == Chan_Z || chan == Chan_DeepFront || chan == Chan_DeepBack)
-                    Pz = pixel.getData(*Pzp, i);
-                if (chan == Chan_Z)
-                    pels.push_back(1/Pz[0]);
-                else if (chan == Chan_DeepFront )
-                    pels.push_back(Pz[0]);
-                else if ( chan == Chan_DeepBack )
-                    pels.push_back(Pz[0]);
+                {
+                    Pz = Pz2 = pixel.getData(*Pzp, i);
+                    if (!discrete)
+                    {
+                        if (i+1 <= numpts)
+                            Pz2 = pixel.getData(*Pzp, i+1);
+                        else
+                            continue;
+                    }
+                    if (chan == Chan_Z)
+                        pels.push_back(1/Pz[0]);
+                    else if (chan == Chan_DeepFront )
+                        pels.push_back(Pz[0]);
+                    else if ( chan == Chan_DeepBack )
+                        pels.push_back(Pz2[0]);
+                }
                 else if (channel_map.count(chan))
                 {
                     Cf = pixel.getData(*chp, i);
@@ -355,6 +368,16 @@ doDeepEngine(DD::Image::Box box, const ChannelSet& channels, DeepOutputPlane& pl
                         pels.push_back(Cf[cindex] * Cf[3]);
                     else 
                         pels.push_back(Cf[cindex]);
+                }
+                // FIXME: This is wrong, it should be push_back(0), 
+                // but the only channels ending up here are Of.*, so this is fallback
+                // mostly for deep shadow maps, which otherwise won't have Of.
+                // Why 'Of' in deep shadow maps aren't peaked up by channel_map.count(chan)?
+                else 
+                {
+                    Cf = pixel.getData(*Ofp, i);
+                    pels.push_back(Cf[cindex]);
+                    //pels.push_back(0); 
                 }
             }
         }
