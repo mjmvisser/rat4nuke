@@ -6,7 +6,7 @@ ifeq ($(DEBUG),1)
     CXXFLAGS += -DDEBUG
 endif
 LINKFLAGS ?= -L$(NDKDIR) -L$(HFS)/dsolib
-LIBS ?= -lDDImage -lHoudiniUI -lHoudiniOPZ -lHoudiniOP3 -lHoudiniOP2 -lHoudiniOP1 -lHoudiniUT -lHoudiniPRM -lpthread
+LIBS ?= -lDDImage -lHoudiniUT 
 LINKFLAGS += -shared
 all: ratReader.so ratReaderDeep.so
 .PRECIOUS : %.os
