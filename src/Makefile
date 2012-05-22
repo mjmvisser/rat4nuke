@@ -5,6 +5,9 @@ CXXFLAGS ?= -g -c -DUSE_GLEW -DLINUX -I$(NDKDIR)/include -I$(HT)/include -msse -
 ifeq ($(DEBUG),1)
     CXXFLAGS += -DDEBUG
 endif
+ifeq ($(HOUDINI_MAJOR_RELEASE), 12)
+    CXXFLAGS += -DHOUDINI_12
+endif
 LINKFLAGS ?= -L$(NDKDIR) -L$(HFS)/dsolib
 LIBS ?= -lDDImage -lHoudiniUT 
 LINKFLAGS += -shared

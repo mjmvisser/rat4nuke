@@ -244,11 +244,13 @@ ratDeepReader(DeepReaderOwner* op, const std::string& filename) : DeepReader(op)
         }
     }
 
+    #if defined(HOUDINI_12)
     UT_Matrix4 mat;
     if (rat->getWorldToNDC(mat, true))
         _metaData.setData("space:worldtoNDC", mat.data(), 16);
     if (rat->getCameraToNDC(mat, true))
         _metaData.setData("space:cameratoNDC", mat.data(), 16);
+    #endif
 }
 
 ~ratDeepReader()
