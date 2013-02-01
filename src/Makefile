@@ -19,3 +19,5 @@ all: ratReader.so ratReaderDeep.so
 	$(LINK) $(LINKFLAGS) $(LIBS) -o $(@) $<
 clean:
 	rm -rf *.os ratReader.so ratReaderDeep.so
+install:
+	mv *.so ~/.nuke

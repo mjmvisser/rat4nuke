@@ -270,12 +270,21 @@ ratDeepReader(DeepReaderOwner* op, const std::string& filename) : DeepReader(op)
 void 
 open(const std::string& filename){}
 
-void 
+#if DD_IMAGE_VERSION_MAJOR>6
+bool 
+#else
+void
+#endif
 doDeepEngine(DD::Image::Box box, const ChannelSet& channels, DeepOutputPlane& plane)
 {
     Guard g(lock);
     if (!rat)
+    {
         _op->error("error opening file");
+        #if DD_IMAGE_VERSION_MAJOR>6
+        return false;
+        #endif
+    }
 
     raw       = rawKnob ? rawKnob->get_value() : false;
     discrete  = discreteKnob ? discreteKnob->get_value() : true;
@@ -314,7 +323,13 @@ doDeepEngine(DD::Image::Box box, const ChannelSet& channels, DeepOutputPlane& pl
     }
 
     if (!Pzp || !Ofp)
+    {
             _op->error("Can't find Of or Pz channels! Is it really a DCM file?");
+            #if DD_IMAGE_VERSION_MAJOR>6
+            return false;
+            #endif
+    }
+    
     #if defined(DEBUG)
     else
         _op->warning("Of and Pz have been found.");
@@ -386,6 +401,10 @@ doDeepEngine(DD::Image::Box box, const ChannelSet& channels, DeepOutputPlane& pl
         plane.addPixel(pels);
     }
     pixel.close();
+
+    #if DD_IMAGE_VERSION_MAJOR>6
+    return true; 
+    #endif
 }
 };
 
