@@ -206,14 +206,14 @@ ratDeepReader(DeepReaderOwner* op, const std::string& filename) : DeepReader(op)
 
     // Metadatas:
     const UT_Options *opt = rat->getTBFOptions();
-    for (int i =0; i < opt->getNumOptions(); i++)
+    for (UT_Options::iterator i=opt->begin(); i != opt->end(); ++i)
     {
-        const char *name = opt->getOptionName(i);
-        const UT_OptionType type = opt->getOptionType(i);
+        const char *name = i.name();
+        const UT_OptionType type = i.type();
 
         #if defined(DEBUG)
         UT_String buff;
-        opt->getOptionString(name, buff);
+        opt->getOptionString(name, UT_OPTFMT_DISPLAY, buff);
         printf("Option %s: value: %s\n", name, buff.buffer());
         #endif
 
@@ -304,7 +304,6 @@ doDeepEngine(DD::Image::Box box, const ChannelSet& channels, DeepOutputPlane& pl
       _op->warning("Pixel Reader created.");
      #endif
 
-    int height = yres;
     plane = DeepOutputPlane(channels, box);
 
      #if defined(DEBUG)
@@ -341,7 +340,7 @@ doDeepEngine(DD::Image::Box box, const ChannelSet& channels, DeepOutputPlane& pl
         float y = it.y;
         outputContext.from_proxy_xy(x, y);
 
-        pixel.open(x, y);
+        pixel.open(static_cast<int>(x), static_cast<int>(y));
 
         if (!composite)
             pixel.uncomposite(*Pzp, *Ofp, false);
