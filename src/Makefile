@@ -1,23 +1,36 @@
-# Bellow assumes you have both $NDKDIR and $HT set properly in environment:
-MYCXX ?= g++
-LINK ?= g++
-CXXFLAGS ?= -g -c -DUSE_GLEW -DLINUX -I$(NDKDIR)/include -I$(HT)/include -msse -DAMD64 -m64 -fPIC -DSIZEOF_VOID_P=8 -DENABLE_THREADS -DUSE_PTHREADS -DSESI_LITTLE_ENDIAN -D_REENTRANT -D_FILE_OFFSET_BITS=64 -c -DGCC4 -DGCC3 -O2 -fno-strict-aliasing
+# we assume Nuke and Houdini are in your PATH 
+
+# set these appropriately for your version of Nuke
+CXX=g++412
+LINK=$(CXX)
+NUKE_VERSION=7.0
+
+HFS=$(abspath $(dir $(shell which hcustom)/..))
+HOUDINI_CXXFLAGS=$(shell hcustom -c) -DMAKING_DSO
+HOUDINI_LDFLAGS=$(shell hcustom -m) -L$(HFS)/dsolib -Wl,-rpath=$(HFS)/dsolib
+
+NUKE_EXEC=$(shell which Nuke$(NUKE_VERSION))
+NDKDIR=$(abspath $(dir $(NUKE_EXEC)))
+NUKE_CXXFLAGS=-DUSE_GLEW -I$(NDKDIR)/include -fPIC -msse
+NUKE_LDFLAGS=-L$(NDKDIR) -lDDImage
+
+CXXFLAGS=-pipe $(NUKE_CXXFLAGS) $(HOUDINI_CXXFLAGS)
+LDFLAGS=-shared $(NUKE_LDFLAGS) $(HOUDINI_LDFLAGS)
+
 ifeq ($(DEBUG),1)
-    CXXFLAGS += -DDEBUG
+    CXXFLAGS+=-DDEBUG -g
+    LDFLAGS+=-g
+else
+	CXXFLAGS+=-DNDEBUG
 endif
-ifeq ($(HOUDINI_MAJOR_RELEASE), 12)
-    CXXFLAGS += -DHOUDINI_12
-endif
-LINKFLAGS ?= -L$(NDKDIR) -L$(HFS)/dsolib
-LIBS ?= -lDDImage -lHoudiniUT 
-LINKFLAGS += -shared
+
 all: ratReader.so ratReaderDeep.so
-.PRECIOUS : %.os
-%.os: %.cpp
-	$(MYCXX) $(CXXFLAGS) -o $(@) $<
-%.so: %.os
-	$(LINK) $(LINKFLAGS) $(LIBS) -o $(@) $<
+.PRECIOUS : %.o
+%.so: %.o
+	$(LINK) $(LDFLAGS) -o $(@) $<
+
 clean:
-	rm -rf *.os ratReader.so ratReaderDeep.so
+	rm -rf *.o ratReader.so ratReaderDeep.so
+
 install:
 	mv *.so ~/.nuke
