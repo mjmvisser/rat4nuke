@@ -35,3 +35,4 @@ clean:
 
 install:
 	mv *.so $(INSTALL_DIR)
+	cp picReader.tcl $(INSTALL_DIR)
