@@ -4,8 +4,8 @@ with mantra renders.
 
 rat4nuke was originally written by Szymon Kapeniak.
 
-BUILDING
-========
+Building
+--------
 Linux:
 
     $ cd src
