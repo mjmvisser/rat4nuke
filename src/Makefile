@@ -4,6 +4,7 @@
 CXX?=g++412
 LINK=$(CXX)
 NUKE_VERSION?=7.0
+INSTALL_DIR?=~/.nuke
 
 HFS=$(abspath $(dir $(shell which hcustom)/..))
 HOUDINI_CXXFLAGS=$(shell hcustom -c) -DMAKING_DSO
@@ -33,4 +34,4 @@ clean:
 	rm -rf *.o ratReader.so ratReaderDeep.so
 
 install:
-	mv *.so ~/.nuke
+	mv *.so $(INSTALL_DIR)
